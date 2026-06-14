@@ -1,0 +1,48 @@
+# Secrets — never commit
+.env
+.env.*
+*.pem
+*.key
+secrets.env
+!k8s/overlays/dev/secrets.env   # placeholder only — no real values
+
+# Go
+bin/
+/services/*/bin/
+vendor/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.local
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfvars
+!terraform.tfvars.example
+.terraform.tfstate.lock.info
+crash.log
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.out
+*.exe
+coverage.html
+coverage.txt
+
+# Logs
+*.log

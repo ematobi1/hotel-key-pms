@@ -1,0 +1,103 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: hotel-key-gateway
+  namespace: hotel-key
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "kong.hotel-key.internal"
+      tls:
+        httpsRedirect: true
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: hotel-key-tls-cert
+      hosts:
+        - "kong.hotel-key.internal"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: hotel-key-vs
+  namespace: hotel-key
+spec:
+  hosts:
+    - "kong.hotel-key.internal"
+  gateways:
+    - hotel-key-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /v1/hotels
+      route:
+        - destination:
+            host: pms-core
+            port:
+              number: 8080
+    - match:
+        - uri:
+            prefix: /v1/reservations
+      route:
+        - destination:
+            host: reservation
+            port:
+              number: 8080
+    - match:
+        - uri:
+            prefix: /v1/rooms
+      route:
+        - destination:
+            host: room-management
+            port:
+              number: 8080
+    - match:
+        - uri:
+            prefix: /v1/billing
+      route:
+        - destination:
+            host: billing
+            port:
+              number: 8080
+    - match:
+        - uri:
+            prefix: /v1/housekeeping
+      route:
+        - destination:
+            host: housekeeping
+            port:
+              number: 8080
+    - match:
+        - uri:
+            prefix: /v1/maintenance
+      route:
+        - destination:
+            host: maintenance
+            port:
+              number: 8080
+    - match:
+        - uri:
+            prefix: /v1/notifications
+      route:
+        - destination:
+            host: notification
+            port:
+              number: 8080
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: hotel-key
+spec:
+  mtls:
+    mode: STRICT

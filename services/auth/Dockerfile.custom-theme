@@ -1,0 +1,18 @@
+FROM quay.io/keycloak/keycloak:24.0.4 AS theme-builder
+
+WORKDIR /opt/keycloak/themes
+COPY themes/ .
+
+RUN find /opt/keycloak/themes/hotel-key -type f -name "*.ftl" | head -5
+
+FROM quay.io/keycloak/keycloak:24.0.4
+
+COPY --from=theme-builder /opt/keycloak/themes/hotel-key /opt/keycloak/themes/hotel-key
+
+ENV KC_DB=postgres
+ENV KC_THEME_STATIC_MAX_AGE=2592000
+ENV KC_HEALTH_ENABLED=true
+
+EXPOSE 8080 8443
+
+ENTRYPOINT ["/opt/keycloak/bin/kc.sh", "start-dev"]

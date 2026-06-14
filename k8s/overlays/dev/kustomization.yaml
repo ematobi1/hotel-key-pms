@@ -1,0 +1,51 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: hotel-key
+
+bases:
+  - ../../base
+
+commonLabels:
+  environment: dev
+
+patches:
+  - path: patch-ingress.yaml
+    target:
+      kind: Gateway
+      name: hotel-key-gateway
+
+secretGenerator:
+  - name: hotel-key-secrets
+    envs:
+      - secrets.env
+    type: Opaque
+
+images:
+  - name: hotel-key/pms-core
+    newName: 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/hotel-key/pms-core
+    newTag: latest-dev
+  - name: hotel-key/reservation
+    newName: 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/hotel-key/reservation
+    newTag: latest-dev
+  - name: hotel-key/room-management
+    newName: 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/hotel-key/room-management
+    newTag: latest-dev
+  - name: hotel-key/billing
+    newName: 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/hotel-key/billing
+    newTag: latest-dev
+  - name: hotel-key/housekeeping
+    newName: 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/hotel-key/housekeeping
+    newTag: latest-dev
+  - name: hotel-key/maintenance
+    newName: 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/hotel-key/maintenance
+    newTag: latest-dev
+  - name: hotel-key/notification
+    newName: 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/hotel-key/notification
+    newTag: latest-dev
+  - name: hotel-key/channel-manager
+    newName: 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/hotel-key/channel-manager
+    newTag: latest-dev
+  - name: hotel-key/wechat-connector
+    newName: 123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/hotel-key/wechat-connector
+    newTag: latest-dev

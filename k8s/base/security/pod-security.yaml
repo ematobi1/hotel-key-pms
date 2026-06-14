@@ -1,0 +1,25 @@
+# Hardened pod security defaults — applied as a kustomize patch targeting all Deployments.
+# Each service Deployment must also declare a non-root runAsUser explicitly.
+#
+# Applied via: kustomize patches in overlays targeting kind: Deployment
+#
+# This file documents the canonical securityContext block to paste into each service deployment.
+# Actual patch application is in k8s/base/security/patches/pod-security-patch.yaml
+
+# Template for every service's containers[*].securityContext:
+# securityContext:
+#   runAsNonRoot: true
+#   runAsUser: 65532            # matches distroless:nonroot UID
+#   runAsGroup: 65532
+#   readOnlyRootFilesystem: true
+#   allowPrivilegeEscalation: false
+#   seccompProfile:
+#     type: RuntimeDefault
+#   capabilities:
+#     drop: ["ALL"]
+#
+# Template for spec.securityContext (pod level):
+# securityContext:
+#   fsGroup: 65532
+#   seccompProfile:
+#     type: RuntimeDefault

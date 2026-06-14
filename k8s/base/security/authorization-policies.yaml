@@ -1,0 +1,145 @@
+# Zero-trust mTLS authorization: deny everything, then allow explicit paths per service.
+# Each service's service account is the identity principal.
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: hotel-key
+spec:
+  mtls:
+    mode: STRICT
+---
+# Default deny-all ingress for the namespace
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all
+  namespace: hotel-key
+spec: {}
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-pms-core
+  namespace: hotel-key
+spec:
+  selector:
+    matchLabels:
+      app: pms-core
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/hotel-key/sa/kong-gateway"
+              - "cluster.local/ns/hotel-key/sa/channel-manager"
+      to:
+        - operation:
+            paths: ["/v1/hotels*", "/healthz", "/metrics"]
+            methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-reservation
+  namespace: hotel-key
+spec:
+  selector:
+    matchLabels:
+      app: reservation
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/hotel-key/sa/kong-gateway"
+              - "cluster.local/ns/hotel-key/sa/channel-manager"
+              - "cluster.local/ns/hotel-key/sa/pms-core"
+      to:
+        - operation:
+            paths: ["/v1/reservations*", "/healthz", "/metrics"]
+            methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-room-management
+  namespace: hotel-key
+spec:
+  selector:
+    matchLabels:
+      app: room-management
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/hotel-key/sa/kong-gateway"
+              - "cluster.local/ns/hotel-key/sa/reservation"
+              - "cluster.local/ns/hotel-key/sa/housekeeping"
+      to:
+        - operation:
+            paths: ["/v1/rooms*", "/v1/room-types*", "/healthz", "/metrics"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-billing
+  namespace: hotel-key
+spec:
+  selector:
+    matchLabels:
+      app: billing
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/hotel-key/sa/kong-gateway"
+              - "cluster.local/ns/hotel-key/sa/reservation"
+      to:
+        - operation:
+            paths: ["/v1/billing*", "/healthz", "/metrics"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-notification
+  namespace: hotel-key
+spec:
+  selector:
+    matchLabels:
+      app: notification
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/hotel-key/sa/reservation"
+              - "cluster.local/ns/hotel-key/sa/billing"
+              - "cluster.local/ns/hotel-key/sa/housekeeping"
+              - "cluster.local/ns/hotel-key/sa/channel-manager"
+      to:
+        - operation:
+            paths: ["/v1/notifications*", "/healthz", "/metrics"]
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-wechat-connector
+  namespace: hotel-key
+spec:
+  selector:
+    matchLabels:
+      app: wechat-connector
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/hotel-key/sa/notification"
+              - "cluster.local/ns/hotel-key/sa/kong-gateway"
+      to:
+        - operation:
+            paths: ["/v1/wechat*", "/wechat/callback", "/healthz", "/metrics"]

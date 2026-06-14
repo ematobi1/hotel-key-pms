@@ -1,0 +1,201 @@
+version: '3.9'
+
+# All secrets here are for local development ONLY — never commit real credentials.
+# Production secrets live in AWS Secrets Manager.
+
+x-go-service: &go-service
+  restart: unless-stopped
+  networks: [hotel-key]
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  environment:
+    DATABASE_URL: "postgres://hotelkey_admin:dev_password@postgres:5432/hotelkey?sslmode=disable"
+    REDIS_URL: "redis://redis:6379"
+    KAFKA_BROKERS: "kafka:9092"
+    GIN_MODE: debug
+
+services:
+  # ─── Infrastructure ───────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:15.5-alpine
+    environment:
+      POSTGRES_DB: hotelkey
+      POSTGRES_USER: hotelkey_admin
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/pms-core/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hotelkey_admin -d hotelkey"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [hotel-key]
+
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [hotel-key]
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    networks: [hotel-key]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks: [hotel-key]
+
+  keycloak:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile.custom-theme
+    ports:
+      - "8443:8080"
+    environment:
+      KC_DB: dev-mem
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: dev_admin_password
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    networks: [hotel-key]
+
+  # ─── Microservices ────────────────────────────────────────────────────────────
+
+  pms-core:
+    <<: *go-service
+    build:
+      context: ./services/pms-core
+    ports:
+      - "8081:8080"
+    environment:
+      DATABASE_URL: "postgres://hotelkey_admin:dev_password@postgres:5432/hotelkey?sslmode=disable"
+
+  reservation:
+    <<: *go-service
+    build:
+      context: ./services/reservation
+    ports:
+      - "8082:8080"
+
+  room-management:
+    <<: *go-service
+    build:
+      context: ./services/room-management
+    ports:
+      - "8083:8080"
+
+  billing:
+    <<: *go-service
+    build:
+      context: ./services/billing
+    ports:
+      - "8084:8080"
+
+  housekeeping:
+    <<: *go-service
+    build:
+      context: ./services/housekeeping
+    ports:
+      - "8085:8080"
+
+  maintenance:
+    <<: *go-service
+    build:
+      context: ./services/maintenance
+    ports:
+      - "8086:8080"
+
+  notification:
+    <<: *go-service
+    build:
+      context: ./services/notification
+    ports:
+      - "8087:8080"
+
+  channel-manager:
+    <<: *go-service
+    build:
+      context: ./services/channel-manager
+    ports:
+      - "8088:8080"
+
+  wechat-connector:
+    <<: *go-service
+    build:
+      context: ./services/wechat-connector
+    ports:
+      - "8089:8080"
+    environment:
+      DATABASE_URL: "postgres://hotelkey_admin:dev_password@postgres:5432/hotelkey?sslmode=disable"
+      REDIS_URL: "redis://redis:6379"
+      WECHAT_TOKEN: dev_wechat_token
+      WECHAT_APP_ID: PLACEHOLDER
+      WECHAT_APP_SECRET: PLACEHOLDER
+
+  # ─── Frontend (dev only) ──────────────────────────────────────────────────────
+
+  dashboard:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host"
+    volumes:
+      - ./frontend/react-dashboard:/app
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: "http://localhost:8081"
+      VITE_KEYCLOAK_URL: "http://localhost:8443"
+      VITE_KEYCLOAK_REALM: hotel-key
+      VITE_KEYCLOAK_CLIENT_ID: pms-dashboard
+    networks: [hotel-key]
+
+volumes:
+  postgres_data:
+  redis_data:
+  zookeeper_data:
+  kafka_data:
+
+networks:
+  hotel-key:
+    driver: bridge

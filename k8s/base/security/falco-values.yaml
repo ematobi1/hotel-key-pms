@@ -1,0 +1,90 @@
+falco:
+  grpc:
+    enabled: true
+  grpc_output:
+    enabled: true
+  json_output: true
+  json_include_output_property: true
+  log_level: info
+
+  rules_file:
+    - /etc/falco/falco_rules.yaml
+    - /etc/falco/falco_rules.local.yaml
+    - /etc/falco/rules.d
+
+  customRules:
+    hotel-key-rules.yaml: |-
+      - rule: Reverse Shell Detected
+        desc: Detects netcat or bash-based reverse shell attempts
+        condition: >
+          spawned_process and
+          (proc.name = "nc" or
+           (proc.name = "bash" and proc.args contains "/dev/tcp") or
+           (proc.name = "sh" and proc.args contains "/dev/tcp"))
+        output: "Reverse shell detected (pod=%k8s.pod.name ns=%k8s.ns.name cmd=%proc.cmdline)"
+        priority: CRITICAL
+        tags: [shell, network, hotel-key]
+
+      - rule: Unexpected Outbound Network from Pod
+        desc: Detects unexpected egress from hotel-key pods to external IPs
+        condition: >
+          outbound and
+          k8s.ns.name = "hotel-key" and
+          not fd.sip in (rfc_1918_addresses) and
+          not proc.name in (allowed_external_processes)
+        output: "Unexpected external connection (pod=%k8s.pod.name dst=%fd.sip:%fd.sport cmd=%proc.cmdline)"
+        priority: WARNING
+        tags: [network, hotel-key]
+
+      - rule: Sensitive Mount in Hotel Key Pod
+        desc: Alert on /proc or /sys mounts inside hotel-key containers
+        condition: >
+          container and
+          k8s.ns.name = "hotel-key" and
+          (fd.name startswith "/proc/" or fd.name startswith "/sys/")
+        output: "Sensitive filesystem access (pod=%k8s.pod.name file=%fd.name)"
+        priority: ERROR
+        tags: [filesystem, hotel-key]
+
+      - rule: Write to Read-Only Filesystem
+        desc: Detects write attempt to a container with readOnlyRootFilesystem
+        condition: >
+          open_write and
+          container and
+          k8s.ns.name = "hotel-key" and
+          not fd.name startswith "/tmp" and
+          not fd.name startswith "/dev"
+        output: "Write to read-only filesystem (pod=%k8s.pod.name file=%fd.name)"
+        priority: ERROR
+        tags: [filesystem, hotel-key]
+
+      - rule: Cryptomining Process
+        desc: Detects known cryptominer process names
+        condition: >
+          spawned_process and
+          proc.name in (xmrig, minergate, cryptonight, ccminer, cgminer)
+        output: "Cryptominer detected (pod=%k8s.pod.name cmd=%proc.cmdline)"
+        priority: CRITICAL
+        tags: [crypto, hotel-key]
+
+  macros:
+    allowed_external_processes:
+      items: [curl, wget]   # restrict further in production
+    rfc_1918_addresses:
+      items:
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
+
+falcosidekick:
+  enabled: true
+  config:
+    slack:
+      webhookurl: ""   # set via Vault secret
+      minimumpriority: warning
+    aws:
+      cloudwatchlogs:
+        loggroup: "/hotel-key/falco"
+        logstream: ""
+        minimumpriority: warning
+        region: ap-northeast-1
