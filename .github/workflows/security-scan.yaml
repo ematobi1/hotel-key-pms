@@ -37,7 +37,7 @@ jobs:
           docker build -t scan-target:${{ matrix.service }} ./services/${{ matrix.service }}
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: scan-target:${{ matrix.service }}
           format: sarif
@@ -54,7 +54,7 @@ jobs:
           category: trivy-${{ matrix.service }}
 
       - name: Trivy gate
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: scan-target:${{ matrix.service }}
           format: table
@@ -86,11 +86,11 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: services/${{ matrix.service }}/go.mod
+          go-version: '1.26'
           cache-dependency-path: services/${{ matrix.service }}/go.sum
 
       - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
 
       - name: Run gosec
         run: gosec -no-fail -fmt sarif -out gosec.sarif -exclude-dir=vendor ./...
