@@ -1,6 +1,7 @@
+import type { CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { reservationsApi, clearAuthTokens } from '../api/client';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { format } from 'date-fns';
 
 interface Reservation {
@@ -108,5 +109,5 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-const th: React.CSSProperties = { padding: '0.5rem 0.75rem', textAlign: 'left', fontWeight: 600 };
-const td: React.CSSProperties = { padding: '0.5rem 0.75rem' };
+const th: CSSProperties = { padding: '0.5rem 0.75rem', textAlign: 'left', fontWeight: 600 };
+const td: CSSProperties = { padding: '0.5rem 0.75rem' };

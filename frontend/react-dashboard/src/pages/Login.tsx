@@ -1,5 +1,5 @@
-import { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router';
 import { setAuthTokens } from '../api/client';
 
 export default function Login() {

@@ -57,3 +57,6 @@ coverage.txt
 /services/reservation/reservation
 /services/room-management/room-management
 /services/wechat-connector/wechat-connector
+
+# Vendored, hardened JS dependency (overrides deepmerge) — must be committed
+!frontend/staff-mobile-pwa/vendor/
