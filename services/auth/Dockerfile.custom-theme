@@ -1,11 +1,11 @@
-FROM quay.io/keycloak/keycloak:24.0.4 AS theme-builder
+FROM quay.io/keycloak/keycloak:26.8.2-1 AS theme-builder
 
 WORKDIR /opt/keycloak/themes
 COPY themes/ .
 
 RUN find /opt/keycloak/themes/hotel-key -type f -name "*.ftl" | head -5
 
-FROM quay.io/keycloak/keycloak:24.0.4
+FROM quay.io/keycloak/keycloak:26.8.2-1
 
 COPY --from=theme-builder /opt/keycloak/themes/hotel-key /opt/keycloak/themes/hotel-key
 
