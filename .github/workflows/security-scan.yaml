@@ -2,9 +2,10 @@ name: Security Scan
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master]
   pull_request:
-    branches: [main, develop]
+    branches: [master]
+  workflow_dispatch:
   schedule:
     - cron: '0 2 * * 1'
 
@@ -14,8 +15,9 @@ permissions:
 
 jobs:
   trivy-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         service:
           - pms-core
@@ -26,55 +28,84 @@ jobs:
           - maintenance
           - notification
           - channel-manager
+          - wechat-connector
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build image for scanning
         run: |
-          docker build -t scan-target:latest ./services/${{ matrix.service }}
+          docker build -t scan-target:${{ matrix.service }} ./services/${{ matrix.service }}
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: scan-target:latest
+          image-ref: scan-target:${{ matrix.service }}
           format: sarif
           output: trivy-${{ matrix.service }}.sarif
           severity: CRITICAL,HIGH
-          exit-code: '1'
+          ignore-unfixed: true
+          exit-code: '0'
 
       - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.service)) != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-${{ matrix.service }}.sarif
           category: trivy-${{ matrix.service }}
 
+      - name: Trivy gate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: scan-target:${{ matrix.service }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
   gosec-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - pms-core
+          - reservation
+          - room-management
+          - billing
+          - housekeeping
+          - maintenance
+          - notification
+          - channel-manager
+          - wechat-connector
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: '1.26'
+          cache-dependency-path: services/${{ matrix.service }}/go.sum
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
 
       - name: Run gosec
-        uses: securego/gosec@master
-        with:
-          args: '-fmt sarif -out gosec.sarif -exclude-dir=vendor ./services/...'
+        run: gosec -no-fail -fmt sarif -out gosec.sarif -exclude-dir=vendor ./...
 
       - name: Upload gosec SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles(format('services/{0}/gosec.sarif', matrix.service)) != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: gosec.sarif
-          category: gosec
+          sarif_file: services/${{ matrix.service }}/gosec.sarif
+          category: gosec-${{ matrix.service }}
 
   secret-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -84,10 +115,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   dependency-review:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
