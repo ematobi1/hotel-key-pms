@@ -46,3 +46,14 @@ coverage.txt
 
 # Logs
 *.log
+# Go build outputs
+/services/*/*.exe
+/services/billing/billing
+/services/channel-manager/channel-manager
+/services/housekeeping/housekeeping
+/services/maintenance/maintenance
+/services/notification/notification
+/services/pms-core/pms-core
+/services/reservation/reservation
+/services/room-management/room-management
+/services/wechat-connector/wechat-connector
