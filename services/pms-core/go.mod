@@ -2,6 +2,8 @@ module github.com/hotel-key/pms-core
 
 go 1.26.0
 
+toolchain go1.26.11
+
 require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/jackc/pgx/v5 v5.9.2

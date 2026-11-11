@@ -86,7 +86,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version-file: services/${{ matrix.service }}/go.mod
           cache-dependency-path: services/${{ matrix.service }}/go.sum
 
       - name: Install gosec
@@ -101,6 +101,12 @@ jobs:
         with:
           sarif_file: services/${{ matrix.service }}/gosec.sarif
           category: gosec-${{ matrix.service }}
+
+      # Reachability-aware check of Go modules AND the standard library; fails on any finding
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          govulncheck ./...
 
   secret-scan:
     runs-on: ubuntu-24.04

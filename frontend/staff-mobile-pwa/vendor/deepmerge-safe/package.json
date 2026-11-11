@@ -1,0 +1,8 @@
+{
+  "name": "deepmerge-safe",
+  "version": "1.0.0",
+  "description": "Hardened drop-in for deepmerge@4 (GHSA-gcqx-w48m-w2h4): never copies __proto__/constructor/prototype keys.",
+  "main": "index.js",
+  "license": "MIT",
+  "private": true
+}

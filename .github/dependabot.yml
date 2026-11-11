@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
+
+  - package-ecosystem: gomod
+    directories: ["/services/*"]
+    schedule: { interval: weekly }
+    groups:
+      golang-x: { patterns: ["golang.org/x/*"] }
+      go-minor-patch: { patterns: ["*"], update-types: [minor, patch] }
+
+  - package-ecosystem: docker
+    directories: ["/services/*"]
+    schedule: { interval: weekly }
+    groups:
+      base-images: { patterns: ["*"] }
+
+  - package-ecosystem: npm
+    directories: ["/frontend/*"]
+    schedule: { interval: weekly }
+    groups:
+      npm-minor-patch: { patterns: ["*"], update-types: [minor, patch] }

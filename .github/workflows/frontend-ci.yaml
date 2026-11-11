@@ -1,0 +1,51 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [react-dashboard, staff-mobile-pwa]
+    defaults:
+      run:
+        working-directory: frontend/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
+
+      - name: Install (lockfile only)
+        run: npm ci --no-fund
+
+      - name: Audit (fail on any severity)
+        run: npm audit --audit-level=low
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test vendored deepmerge-safe
+        if: matrix.app == 'staff-mobile-pwa'
+        run: node vendor/deepmerge-safe/test.cjs
+
+      - name: Build
+        run: npm run build
