@@ -6,7 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/prometheus/client_golang v1.19.1
-	github.com/redis/go-redis/v9 v9.5.3
+	github.com/redis/go-redis/v9 v9.5.5
 	go.uber.org/zap v1.27.0
 )
 
