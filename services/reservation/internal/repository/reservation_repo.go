@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -55,6 +56,9 @@ type ReservationRepository interface {
 
 var ErrNotFound = fmt.Errorf("not found")
 var ErrConflict = fmt.Errorf("reservation conflict")
+var ErrRoomNotFound = fmt.Errorf("room not found")
+var ErrRoomTypeMismatch = fmt.Errorf("room type does not match reservation")
+var ErrRoomOccupied = fmt.Errorf("room occupied")
 
 type reservationRepository struct{ pool *pgxpool.Pool }
 
@@ -79,15 +83,17 @@ func (r *reservationRepository) List(ctx context.Context, tenantID, hotelID stri
 	}
 
 	var total int
-	tx.QueryRow(ctx, `SELECT COUNT(*) FROM reservations WHERE hotel_id=$1`, hotelID).Scan(&total)
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM reservations WHERE tenant_id=$1 AND hotel_id=$2`, tenantID, hotelID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count reservations: %w", err)
+	}
 
 	rows, err := tx.Query(ctx,
 		`SELECT id, tenant_id, hotel_id, room_id, room_type_id, guest_id,
 		        status, arrival_date, departure_date, num_adults, num_children,
 		        rate_plan, total_amount, currency, channel, external_ref, created_at, updated_at
-		 FROM reservations WHERE hotel_id=$1
-		 ORDER BY arrival_date DESC LIMIT $2 OFFSET $3`,
-		hotelID, limit, offset,
+		 FROM reservations WHERE tenant_id=$1 AND hotel_id=$2
+		 ORDER BY arrival_date DESC LIMIT $3 OFFSET $4`,
+		tenantID, hotelID, limit, offset,
 	)
 	if err != nil {
 		return nil, 0, err
@@ -107,8 +113,14 @@ func (r *reservationRepository) List(ctx context.Context, tenantID, hotelID stri
 		}
 		out = append(out, rv)
 	}
-	tx.Commit(ctx)
-	return out, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	rows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }
 
 func (r *reservationRepository) Get(ctx context.Context, tenantID, id string) (*Reservation, error) {
@@ -224,8 +236,89 @@ func (r *reservationRepository) UpdateStatus(ctx context.Context, tenantID, id, 
 	return &rv, nil
 }
 
+// CheckIn assigns roomID and marks the reservation checked_in in one transaction.
+// The room row is locked FOR UPDATE so concurrent check-ins to the same room
+// serialize on the occupancy check, whatever their dates.
 func (r *reservationRepository) CheckIn(ctx context.Context, tenantID, id, roomID string) (*Reservation, error) {
-	return r.UpdateStatus(ctx, tenantID, id, "checked_in")
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if err := setTenant(ctx, tx, tenantID); err != nil {
+		return nil, err
+	}
+
+	var hotelID, roomTypeID string
+	var arrival, departure time.Time
+	err = tx.QueryRow(ctx,
+		`SELECT hotel_id, room_type_id, arrival_date, departure_date
+		 FROM reservations WHERE id=$1 AND tenant_id=$2
+		 FOR UPDATE`,
+		id, tenantID,
+	).Scan(&hotelID, &roomTypeID, &arrival, &departure)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load reservation: %w", err)
+	}
+
+	var roomRoomTypeID string
+	err = tx.QueryRow(ctx,
+		`SELECT room_type_id FROM rooms
+		 WHERE id=$1 AND tenant_id=$2 AND hotel_id=$3
+		 FOR UPDATE`,
+		roomID, tenantID, hotelID,
+	).Scan(&roomRoomTypeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrRoomNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load room: %w", err)
+	}
+	if roomRoomTypeID != roomTypeID {
+		return nil, ErrRoomTypeMismatch
+	}
+
+	var occupied bool
+	err = tx.QueryRow(ctx,
+		`SELECT EXISTS (
+		   SELECT 1 FROM reservations
+		   WHERE room_id=$1 AND tenant_id=$2 AND id<>$3
+		     AND status='checked_in'
+		     AND arrival_date < $5 AND departure_date > $4
+		 )`,
+		roomID, tenantID, id, arrival, departure,
+	).Scan(&occupied)
+	if err != nil {
+		return nil, fmt.Errorf("check room occupancy: %w", err)
+	}
+	if occupied {
+		return nil, ErrRoomOccupied
+	}
+
+	var rv Reservation
+	err = tx.QueryRow(ctx,
+		`UPDATE reservations SET status='checked_in', room_id=$3, updated_at=now()
+		 WHERE id=$1 AND tenant_id=$2
+		 RETURNING id, tenant_id, hotel_id, room_id, room_type_id, guest_id,
+		           status, arrival_date, departure_date, num_adults, num_children,
+		           rate_plan, total_amount, currency, channel, external_ref, created_at, updated_at`,
+		id, tenantID, roomID,
+	).Scan(
+		&rv.ID, &rv.TenantID, &rv.HotelID, &rv.RoomID, &rv.RoomTypeID, &rv.GuestID,
+		&rv.Status, &rv.ArrivalDate, &rv.DepartureDate, &rv.NumAdults, &rv.NumChildren,
+		&rv.RatePlan, &rv.TotalAmount, &rv.Currency, &rv.Channel, &rv.ExternalRef,
+		&rv.CreatedAt, &rv.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update reservation: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit check-in: %w", err)
+	}
+	return &rv, nil
 }
 
 func (r *reservationRepository) CheckOut(ctx context.Context, tenantID, id string) (*Reservation, error) {

@@ -25,6 +25,8 @@ type CreateReservationRequest struct {
 	Channel       string    `json:"channel"`
 }
 
+var ErrCheckInInProgress = errors.New("concurrent check-in in progress for room")
+
 type ReservationService interface {
 	List(ctx context.Context, tenantID, hotelID string, limit, offset int) ([]repository.Reservation, int, error)
 	Get(ctx context.Context, tenantID, id string) (*repository.Reservation, error)
@@ -100,6 +102,20 @@ func (s *reservationService) UpdateStatus(ctx context.Context, tenantID, id, sta
 }
 
 func (s *reservationService) CheckIn(ctx context.Context, tenantID, id, roomID string) (*repository.Reservation, error) {
+	rv, err := s.repo.Get(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	release, err := s.locker.Acquire(ctx, roomID, rv.ArrivalDate, rv.DepartureDate)
+	if err != nil {
+		if errors.Is(err, lock.ErrLockHeld) {
+			return nil, ErrCheckInInProgress
+		}
+		return nil, fmt.Errorf("acquire lock: %w", err)
+	}
+	defer release(ctx)
+
 	return s.repo.CheckIn(ctx, tenantID, id, roomID)
 }
 

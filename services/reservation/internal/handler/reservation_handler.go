@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -11,6 +12,13 @@ import (
 	"github.com/hotel-key/reservation/internal/repository"
 	"github.com/hotel-key/reservation/internal/service"
 )
+
+// uuidPattern accepts any canonical 8-4-4-4-12 hex UUID. Version bits are not
+// checked because seeded IDs such as 00000000-0000-0000-0001-000000000001 are
+// not RFC 4122 versioned.
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+func isUUID(s string) bool { return uuidPattern.MatchString(s) }
 
 type ReservationHandler struct {
 	svc service.ReservationService
@@ -29,6 +37,16 @@ func errResp(code, msg string) gin.H {
 	return gin.H{"error": gin.H{"code": code, "message": msg}}
 }
 
+func (h *ReservationHandler) internalError(c *gin.Context, msg string, err error) {
+	h.log.Error(msg,
+		zap.Error(err),
+		zap.String("method", c.Request.Method),
+		zap.String("path", c.FullPath()),
+		zap.String("tenant_id", tenantID(c)),
+	)
+	c.JSON(http.StatusInternalServerError, errResp("INTERNAL_ERROR", msg))
+}
+
 func (h *ReservationHandler) List(c *gin.Context) {
 	tid := tenantID(c)
 	if tid == "" {
@@ -36,12 +54,16 @@ func (h *ReservationHandler) List(c *gin.Context) {
 		return
 	}
 	hotelID := c.Query("hotel_id")
+	if !isUUID(hotelID) {
+		c.JSON(http.StatusBadRequest, errResp("VALIDATION_ERROR", "hotel_id is required and must be a UUID"))
+		return
+	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 
 	data, total, err := h.svc.List(c.Request.Context(), tid, hotelID, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, errResp("INTERNAL_ERROR", "list failed"))
+		h.internalError(c, "list failed", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -62,7 +84,7 @@ func (h *ReservationHandler) Get(c *gin.Context) {
 			c.JSON(http.StatusNotFound, errResp("NOT_FOUND", "reservation not found"))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, errResp("INTERNAL_ERROR", "get failed"))
+		h.internalError(c, "get failed", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": rv})
@@ -85,7 +107,7 @@ func (h *ReservationHandler) Create(c *gin.Context) {
 			c.JSON(http.StatusConflict, errResp("DOUBLE_BOOKING", "room type unavailable for requested dates"))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, errResp("INTERNAL_ERROR", err.Error()))
+		h.internalError(c, "create failed", err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": rv})
@@ -110,7 +132,7 @@ func (h *ReservationHandler) UpdateStatus(c *gin.Context) {
 			c.JSON(http.StatusNotFound, errResp("NOT_FOUND", "reservation not found"))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, errResp("INTERNAL_ERROR", "update failed"))
+		h.internalError(c, "update failed", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": rv})
@@ -118,21 +140,47 @@ func (h *ReservationHandler) UpdateStatus(c *gin.Context) {
 
 func (h *ReservationHandler) CheckIn(c *gin.Context) {
 	tid := tenantID(c)
-	var body struct{ RoomID string `json:"room_id"` }
-	c.ShouldBindJSON(&body)
-	rv, err := h.svc.CheckIn(c.Request.Context(), tid, c.Param("id"), body.RoomID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, errResp("INTERNAL_ERROR", err.Error()))
+	if tid == "" {
+		c.JSON(http.StatusUnauthorized, errResp("UNAUTHORIZED", "missing tenant"))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": rv})
+	id := c.Param("id")
+	if !isUUID(id) {
+		c.JSON(http.StatusBadRequest, errResp("VALIDATION_ERROR", "reservation id must be a UUID"))
+		return
+	}
+	var body struct {
+		RoomID string `json:"room_id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || !isUUID(body.RoomID) {
+		c.JSON(http.StatusBadRequest, errResp("VALIDATION_ERROR", "room_id is required and must be a UUID"))
+		return
+	}
+
+	rv, err := h.svc.CheckIn(c.Request.Context(), tid, id, body.RoomID)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, gin.H{"data": rv})
+	case errors.Is(err, repository.ErrNotFound):
+		c.JSON(http.StatusNotFound, errResp("NOT_FOUND", "reservation not found"))
+	case errors.Is(err, repository.ErrRoomNotFound):
+		c.JSON(http.StatusNotFound, errResp("ROOM_NOT_FOUND", "room not found in this hotel"))
+	case errors.Is(err, repository.ErrRoomTypeMismatch):
+		c.JSON(http.StatusBadRequest, errResp("ROOM_TYPE_MISMATCH", "room does not match the reservation's room type"))
+	case errors.Is(err, repository.ErrRoomOccupied):
+		c.JSON(http.StatusConflict, errResp("ROOM_OCCUPIED", "room is occupied by another checked-in reservation for overlapping dates"))
+	case errors.Is(err, service.ErrCheckInInProgress):
+		c.JSON(http.StatusConflict, errResp("CHECK_IN_IN_PROGRESS", "another check-in for this room is in progress"))
+	default:
+		h.internalError(c, "check-in failed", err)
+	}
 }
 
 func (h *ReservationHandler) CheckOut(c *gin.Context) {
 	tid := tenantID(c)
 	rv, err := h.svc.CheckOut(c.Request.Context(), tid, c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, errResp("INTERNAL_ERROR", err.Error()))
+		h.internalError(c, "check-out failed", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": rv})
@@ -141,7 +189,7 @@ func (h *ReservationHandler) CheckOut(c *gin.Context) {
 func (h *ReservationHandler) Cancel(c *gin.Context) {
 	tid := tenantID(c)
 	if err := h.svc.Cancel(c.Request.Context(), tid, c.Param("id")); err != nil {
-		c.JSON(http.StatusInternalServerError, errResp("INTERNAL_ERROR", err.Error()))
+		h.internalError(c, "cancel failed", err)
 		return
 	}
 	c.Status(http.StatusNoContent)
